@@ -2,11 +2,9 @@ package com.example.discord4j.Controllers;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
-@RestController
 public class JokeApiController {
     private static final String JOKE_API_BASE_URL = "https://v2.jokeapi.dev/joke/";
 

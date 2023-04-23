@@ -25,7 +25,6 @@ public class BungieApiController {
         this.dayOneController = dayOneController;
         this.lowManController = lowManController;
     }
-
     public void getMembershipInfo(String bungieId, String command, Message message) {
         String searchDestinyPlayer = "/Destiny2/SearchDestinyPlayer/-1/{bungieId}/";
         System.out.println("Bungie ID: " + bungieId);
@@ -42,25 +41,16 @@ public class BungieApiController {
                 error -> System.err.println("Error accessing Bungie API: " + error.getMessage())
         );
     }
+
     private void parseMembershipInfo (String responseBody, String command, Message message) {
+        String membershipType, membershipId;
         JSONObject jsonObject = new JSONObject(responseBody);
         JSONArray responseArray = jsonObject.getJSONArray("Response");
+        JSONObject user = responseArray.getJSONObject(0);
 
-        String membershipType, membershipId;
-        for (int i = 0; i < responseArray.length(); i++) {
-            JSONObject user = responseArray.getJSONObject(i);
-            JSONArray applicableMembershipTypes = user.getJSONArray("applicableMembershipTypes");
-
-            if (!applicableMembershipTypes.isEmpty()) {
-                membershipType = String.valueOf(user.getInt("membershipType"));
-                membershipId = user.getString("membershipId");
-
-                System.out.println("Membership Type: " + membershipType);
-                System.out.println("Membership ID: " + membershipId);
-                getProfileData(membershipType, membershipId, command, message);
-                break;
-            }
-        }
+        membershipType = String.valueOf(user.getInt("membershipType"));
+        membershipId = user.getString("membershipId");
+        getProfileData(membershipType, membershipId, command, message);
     }
     private void getProfileData(String membershipType, String membershipId,
                                 String command, Message message) {
@@ -89,6 +79,8 @@ public class BungieApiController {
         JSONObject charactersData = responseData.getJSONObject
                 ("characters").getJSONObject("data");
 
+        System.out.println("Membership Type: " + membershipType);
+        System.out.println("Membership ID: " + membershipId);
         List<String> characterIds = new ArrayList<>();
         for (String characterId : charactersData.keySet()) {
             characterIds.add(characterId);

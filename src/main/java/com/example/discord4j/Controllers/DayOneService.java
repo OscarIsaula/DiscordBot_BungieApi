@@ -22,17 +22,16 @@ public class DayOneService {
     private final Map<String, Raid> raids = Raid.getRaids(); // Call HashMap in Models.Raid
 
     @Autowired
-    public DayOneService(WebClient webClient) {
+    protected DayOneService(WebClient webClient) {
         this.webClient = webClient;
     }
-    public void getActivityHistory(List<String> characterIds, String membershipType,
+    protected void getActivityHistory(List<String> characterIds, String membershipType,
                                    String membershipId, Message message) {
         String activityHistoryPath = "/Destiny2/{membershipType}/Account/{membershipId}" +
                 "/Character/{characterId}/Stats/Activities/";
 
-        for (String characterId : characterIds) {
-
-            for (int page = 0; page < 50; page++) {
+        for (int page = 0; page < 50; page++) {
+            for (String characterId : characterIds) {
                 String pageNum = String.valueOf(page);
 
                 Mono<String> response = webClient.get()
@@ -75,13 +74,12 @@ public class DayOneService {
             long activityHash = activity.getJSONObject("activityDetails").getLong("referenceId");
 
             raidList.stream()
-                    .filter(raid -> raid != null && Long.toString(activityHash).equals(raid.getHash()))
+                    .filter(raid -> raid != null && Long.toString(activityHash).equals(raid.hash()))
                     .findFirst()
                     .ifPresent(raid -> processRaid(activity, raid, result, formatter));
         }
-        String trimmedResult = result.toString().trim();
-        String cleanedResult = trimmedResult.replaceAll("\\s*\\n\\s*", "\n");
-        System.out.println(cleanedResult);
+        String cleanedResult = result.toString().trim();
+        System.out.println(result);
         ConcreteMessageListener listener = new ConcreteMessageListener();
         listener.day1Command(cleanedResult, message).subscribe();
     }
@@ -94,10 +92,10 @@ public class DayOneService {
             Instant startTime = Instant.parse(activity.getString("period"));
             long activityDurationSeconds = values.getJSONObject("activityDurationSeconds").getJSONObject("basic").getLong("value");
             Instant completionTime = startTime.plusSeconds(activityDurationSeconds);
-            Instant raidLaunchTime = Instant.parse(raid.getReleaseTime());
+            Instant raidLaunchTime = Instant.parse(raid.releaseTime());
             Duration timeDifference = Duration.between(raidLaunchTime, completionTime);
 
-            if (timeDifference.toHours() <= raid.getHours()) {
+            if (timeDifference.toHours() <= raid.hours()) {
                 long hoursAfterLaunch = timeDifference.toHours();
                 long minutesAfterLaunch = timeDifference.toMinutes() % 60;
 
@@ -108,7 +106,7 @@ public class DayOneService {
                 long instanceId = activity.getJSONObject("activityDetails").getLong("instanceId");
 
                 String time = completionTime.atZone(ZoneId.systemDefault()).format(formatter);
-                result.append(raid.getName()).append(": <https://raid.report/pgcr/").append(instanceId).append(">\n");
+                result.append(raid.name()).append(": <https://raid.report/pgcr/").append(instanceId).append(">\n");
                 result.append("Cleared ").append(hoursAfterLaunch).append("h ").append
                         (minutesAfterLaunch).append("m post launch @ ").append(time).append(" EST\n");
                 result.append("Instance duration: ").append(hours).append("h ").append(minutes)

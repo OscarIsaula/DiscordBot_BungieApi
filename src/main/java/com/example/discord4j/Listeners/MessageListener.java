@@ -9,7 +9,6 @@ import discord4j.rest.util.Color;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
-
 import java.util.List;
 import java.util.Random;
 
@@ -17,14 +16,14 @@ import java.util.Random;
 public abstract class MessageListener {
 
     @Autowired
-    public JokeApiController jokeApiController;
-    @Autowired
     public BungieApiController bungieApiController;
+    public JokeApiController jokeApiController;
     public final QuoteController quoteController;
 
     @Autowired
     protected MessageListener() {
         quoteController = new QuoteController();
+        jokeApiController = new JokeApiController();
     }
 
     private String extractUsername(String message) {
@@ -32,52 +31,52 @@ public abstract class MessageListener {
         return messageParts.length == 2 ? messageParts[1] : "";
     }
 
-    public Mono<Void> processCommand(Message eventMessage) {
+    protected Mono<Void> processCommand(Message eventMessage) {
         return Mono.just(eventMessage)
                 .filter(message -> message.getAuthor()
                         .map(user -> !user.isBot()).orElse(false))
                 .flatMap(message -> {
                     String content = message.getContent();
+                    String command;
+                    String bungieId;
+
                     if (content.startsWith("!day1")) {
-                        String command = "day1";
-                        String bungieId = extractUsername(content);
-                        if (bungieId.isEmpty()) {
-                            return message.getChannel()
-                                    .flatMap(channel -> channel.createMessage(
-                                    "Please add your 'bungie_id' following the " +
-                                            "command: !day1 (ex. '!day1 Aegis#8706')"));
-                        }
-                        bungieApiController.getMembershipInfo
-                                (bungieId, command, message);
+                        command = "day1";
+                        bungieId = extractUsername(content);
+                        return processBungieCommand(bungieId, command, message);
                     } else if (content.startsWith("!lowman")) {
-                        String command = "lowman";
-                        String bungieId = extractUsername(content);
-                        if (bungieId.isEmpty()) {
-                            return message.getChannel()
-                                    .flatMap(channel -> channel.createMessage(
-                                    "Please add your 'bungie_id' following the " +
-                                            "command: !lowman (ex. '!lowman Aegis#8706')"));
-                        }
-                        bungieApiController.getMembershipInfo
-                                (bungieId, command, message);
+                        command = "lowman";
+                        bungieId = extractUsername(content);
+                        return processBungieCommand(bungieId, command, message);
                     } else if (content.equalsIgnoreCase("!help")) {
                         return helpCommand(message);
                     } else if (content.equalsIgnoreCase("!quote")) {
                         return quoteCommand(message);
-                    } else if (content.equalsIgnoreCase
-                            ("!was kap blackballed")) {
+                    } else if (content.equalsIgnoreCase("!was kap blackballed")) {
                         return miscCommand(message);
                     } else if (content.equalsIgnoreCase("!joke")) {
                         return jokeCommand(message);
                     }
                     return Mono.empty();
-                    }).then();
+                }).then();
+    }
+
+    private Mono<Void> processBungieCommand(String bungieId, String command, Message message) {
+        if (bungieId.isEmpty()) {
+            return message.getChannel()
+                    .flatMap(channel -> channel.createMessage(
+                            "Please add your 'bungie_id' following the " +
+                                    "command: !" + command +
+                                    " (ex. '!" + command + " Aegis#8706')")).then();
+        }
+        bungieApiController.getMembershipInfo(bungieId, command, message);
+        return Mono.empty();
     }
     private Mono<Void> helpCommand(Message message) {
         // handle the !help command
         return message.getChannel()
                 .flatMap(channel -> channel.createMessage("""
-                        The following commands are currently active:
+                        TheQuickster handles the following commands:
                         \s
                         !day1 bungie_id
                         !lowman bungie_id (Under Construction)
@@ -108,8 +107,10 @@ public abstract class MessageListener {
             return Mono.empty();
         }
 
+        String[] resultLines = results.split("\n");
+
         return message.getChannel()
-                .flatMap(channel -> channel.createMessage(results))
+                .flatMap(channel -> channel.createEmbed(spec -> buildEmbed(spec, resultLines)))
                 .then();
     }
     private String getRandomQuote(List<String> quotes) {
@@ -138,7 +139,6 @@ public abstract class MessageListener {
                 )
                 .then();
     }
-
     private void buildEmbed(LegacyEmbedCreateSpec spec, String[] resultLines) {
         spec.setColor(Color.of(255, 100, 100)); // Set the embed color
 
@@ -150,7 +150,4 @@ public abstract class MessageListener {
             spec.addField("", "" + title + "\n" + url + "\n" + description, false);
         }
     }
-
-
-
 }

@@ -3,32 +3,7 @@ package com.example.discord4j.Models;
 import java.util.HashMap;
 import java.util.Map;
 
-public class Raid {
-    private final String name;
-    private final String hash;
-    private final String releaseTime;
-    private final int hours;
-
-    public Raid(String name, String hash, String releaseTime, int hours) {
-        this.name = name;
-        this.hash = hash;
-        this.releaseTime = releaseTime;
-        this.hours = hours;
-    }
-    public String getName() {
-        return name;
-    }
-
-    public String getHash() {
-        return hash;
-    }
-
-    public String getReleaseTime() {
-        return releaseTime;
-    }
-    public int getHours() {
-        return hours;
-    }
+public record Raid(String name, String hash, String releaseTime, int hours) {
     public static Map<String, Raid> getRaids() {
         Map<String, Raid> raids = new HashMap<>();
         raids.put("LW", new Raid("Last Wish", "2122313384",
