@@ -1,68 +1,77 @@
 package com.example.discord4j.Controllers;
 
+import com.example.discord4j.Listeners.ConcreteMessageListener;
 import com.example.discord4j.Models.Raid;
 import discord4j.core.object.entity.Message;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
 
-import java.time.format.DateTimeFormatter;
+import java.time.Duration;
 import java.util.*;
 
 @Service
 public class LowManService {
+    @Value("${bungie.api.key}")
+    private String apiKey;
     private final WebClient webClient;
+    private final ConcreteMessageListener listener;
     private final Map<String, Raid> raids = Raid.getRaids(); // Call HashMap in Models.Raid
-    List<Raid> raidList = Arrays.asList(raids.get("LW"), raids.get("SotP"),
-            raids.get("CoS"), raids.get("GoS"), raids.get("DSC"), raids.get("VoG"),
-            raids.get("VotD"), raids.get("KF"), raids.get("RoN"));
+    private HashSet<String> report = new HashSet<>();
+
     @Autowired
     protected LowManService(WebClient webClient) {
         this.webClient = webClient;
+        this.listener = new ConcreteMessageListener();
     }
     protected void getActivityHistory(List<String> characterIds, String membershipType,
-                                   String membershipId, Message message) {
+                                      String membershipId, Message message) {
         String activityHistoryPath = "/Destiny2/{membershipType}/Account/{membershipId}" +
                 "/Character/{characterId}/Stats/Activities/";
 
-        for (int page = 0; page < 50; page++) {
-            for (String characterId : characterIds) {
-                String pageNum = String.valueOf(page);
+        Flux.range(0, 50) // Create a Flux for the pages
+                .concatMap(page ->
+                        Flux.fromIterable(characterIds) // Create a Flux for the characterIds
+                                .concatMap(characterId -> {
+                                    String pageNum = String.valueOf(page);
 
-                Mono<String> response = webClient.get()
-                        .uri(uriBuilder -> uriBuilder
-                                .path(activityHistoryPath)
-                                .queryParam("mode", "4") // 4 for raids
-                                .queryParam("count", "100")
-                                .queryParam("page", pageNum)
-                                .build(membershipType, membershipId, characterId))
-                        .retrieve()
-                        .bodyToMono(String.class);
-
-                response.subscribe(
-                        responseBody -> parseActivityHistory
-                                (responseBody, message),
-                        error -> System.err.println
-                                ("Error accessing Bungie API: " + error.getMessage())
+                                    return webClient.get()
+                                            .uri(uriBuilder -> uriBuilder
+                                                    .path(activityHistoryPath)
+                                                    .queryParam("mode", "4") // 4 for raids
+                                                    .queryParam("count", "100")
+                                                    .queryParam("page", pageNum)
+                                                    .build(membershipType, membershipId, characterId))
+                                            .retrieve()
+                                            .bodyToMono(String.class);
+                                })
+                )
+                .delayElements(Duration.ofSeconds(2)) // Add a delay of 1 second between each request
+                .subscribe(
+                        responseBody -> parseActivityHistory(responseBody, message),
+                        error -> System.err.println("Error accessing Bungie API: " + error.getMessage())
                 );
-            }
-        }
     }
+
     private void parseActivityHistory(String responseBody, Message message) {
-        Map<String, String> soloInstanceIds = new HashMap<>();
-        Map<String, String> duoInstanceIds = new HashMap<>();
-        Map<String, String> trioInstanceIds = new HashMap<>();
         JSONObject jsonObject = new JSONObject(responseBody);
         JSONObject responseData = jsonObject.getJSONObject("Response");
         if (!responseData.has("activities")) {
             return;
         }
-        JSONArray activities = responseData.getJSONArray("activities");
 
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+        List<Raid> raidList = Arrays.asList(raids.get("LW"), raids.get("GoS"), raids.get("DSC"), raids.get("VoG"),
+                raids.get("VotD"), raids.get("KF"), raids.get("RoN"));
+
+        JSONArray activities = responseData.getJSONArray("activities");
 
         for (int i = 0; i < activities.length(); i++) {
             JSONObject activity = activities.getJSONObject(i);
@@ -72,147 +81,96 @@ public class LowManService {
                     .filter(raid -> raid != null && Long.toString(activityHash).equals(raid.hash()))
                     .findFirst()
                     .ifPresent(raid -> getInstanceIds
-                            (activity, raid, soloInstanceIds, duoInstanceIds, trioInstanceIds, formatter));
+                            (activity, raid, message));
         }
-        processRaids(soloInstanceIds, duoInstanceIds, trioInstanceIds);
     }
-    private void getInstanceIds(JSONObject activity, Raid raid, Map<String, String> soloInstanceIds,
-                                Map<String, String> duoInstanceIds, Map<String, String> trioInstanceIds, DateTimeFormatter formatter) {
+    private void getInstanceIds(JSONObject activity, Raid raid, Message message) {
         JSONObject values = activity.getJSONObject("values");
         double completedValue = values.getJSONObject("completed").getJSONObject("basic").getDouble("value");
         double playerCount = values.getJSONObject("playerCount").getJSONObject("basic").getDouble("value");
-        long instanceId = activity.getJSONObject("activityDetails").getLong("instanceId");
 
-        if (completedValue == 1.0 && playerCount == 3.0) {
-            trioInstanceIds.put(raid.name(), String.valueOf(instanceId));
-        }
-        else if (completedValue == 1.0 && playerCount == 2.0) {
-            duoInstanceIds.put(raid.name(), String.valueOf(instanceId));
-        }
-        else {
-            soloInstanceIds.put(raid.name(), String.valueOf(instanceId));
+        if (completedValue == 1.0 && playerCount <= 9.0) {
+            long instanceId = activity.getJSONObject("activityDetails").getLong("instanceId");
+            pgcrEndpoint(String.valueOf(instanceId), raid, message);
         }
     }
-    private void processRaids(Map<String, String> soloInstanceIds, Map<String, String> duoInstanceIds,
-                              Map<String, String> trioInstanceIds) {
-
-        StringBuilder resultBuilder = new StringBuilder();
-        List<String> raidNames = Arrays.asList("LW", "SotP", "CoS", "GoS", "DSC", "VoG", "VotD", "KF", "RoN");
-        Map<String, String> bestRaidResults = new HashMap<>();
-
-        for (String raidName : raidNames) {
-            String soloInstanceId = soloInstanceIds.get(raidName);
-            String duoInstanceId = duoInstanceIds.get(raidName);
-            String trioInstanceId = trioInstanceIds.get(raidName);
-
-            Mono<Boolean> isFreshSolo = isFreshRaid(soloInstanceId);
-            Mono<Boolean> isFlawlessSolo = isFlawlessRaid(soloInstanceId);
-            Mono<Boolean> isFreshDuo = isFreshRaid(duoInstanceId);
-            Mono<Boolean> isFlawlessDuo = isFlawlessRaid(duoInstanceId);
-            Mono<Boolean> isFreshTrio = isFreshRaid(trioInstanceId);
-            Mono<Boolean> isFlawlessTrio = isFlawlessRaid(trioInstanceId);
-
-            Mono.zip(isFreshSolo, isFlawlessSolo, isFreshDuo, isFlawlessDuo, isFreshTrio, isFlawlessTrio)
-                    .doOnNext(tuple -> {
-                        boolean freshSolo = tuple.getT1();
-                        boolean flawlessSolo = tuple.getT2();
-                        boolean freshDuo = tuple.getT3();
-                        boolean flawlessDuo = tuple.getT4();
-                        boolean freshTrio = tuple.getT5();
-                        boolean flawlessTrio = tuple.getT6();
-
-                        String bestRaidResult = "";
-
-                        if (flawlessSolo) {
-                            bestRaidResult = "Fresh and Flawless Solo raid (instanceId: " + soloInstanceId + ")";
-                        } else if (freshSolo) {
-                            bestRaidResult = "Fresh Solo raid (instanceId: " + soloInstanceId + ")";
-                        } else {
-                            bestRaidResult = "Solo raid (instanceId: " + soloInstanceId + ")";
-                        }
-
-                        if (flawlessDuo) {
-                            bestRaidResult = "Fresh and Flawless Duo raid (instanceId: " + duoInstanceId + ")";
-                        } else if (freshDuo) {
-                            bestRaidResult = "Fresh Duo raid (instanceId: " + duoInstanceId + ")";
-                        } else {
-                            bestRaidResult = "Duo raid (instanceId: " + duoInstanceId + ")";
-                        }
-
-                        if (flawlessTrio) {
-                            bestRaidResult = "Fresh and Flawless Trio raid (instanceId: " + trioInstanceId + ")";
-                        } else if (freshTrio) {
-                            bestRaidResult = "Fresh Trio raid (instanceId: " + trioInstanceId + ")";
-                        } else {
-                            bestRaidResult = "Trio raid (instanceId: " + trioInstanceId + ")";
-                        }
-
-                        bestRaidResults.put(raidName, bestRaidResult);
-                    })
-                    .subscribe();
-        }
-        try {
-            Thread.sleep(5000);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        // Print the best raid results
-        for (String raidName : raidNames) {
-            resultBuilder.append(raidName).append("\n");
-            resultBuilder.append(bestRaidResults.get(raidName)).append("\n\n");
-        }
-
-        System.out.println(resultBuilder);
-
-        // You can use resultBuilder.toString() to get the final result as a String.
-    }
-    private Mono<Boolean> isFlawlessRaid(String instanceId) {
+    private void pgcrEndpoint(String instanceId, Raid raid, Message message) {
         String pgcrEndpoint = "/Destiny2/Stats/PostGameCarnageReport/{instanceId}/";
 
-        return webClient.get()
-                .uri(uriBuilder -> uriBuilder.path(pgcrEndpoint).build(instanceId))
+        WebClient statsWebClient = WebClient.builder()
+                .baseUrl("https://stats.bungie.net/Platform")
+                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .defaultHeader("X-API-Key", apiKey)
+                .build();
+
+        Mono<String> response = statsWebClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path(pgcrEndpoint)
+                        .build(instanceId))
                 .retrieve()
                 .bodyToMono(String.class)
-                .map(responseBody -> {
-                    JSONObject jsonObject = new JSONObject(responseBody);
-                    JSONArray entries = jsonObject.getJSONObject("Response").getJSONArray("entries");
+                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))); // Retry 3 times with an exponential backoff starting at 1 second
 
-                    boolean isFlawless = true;
-
-                    for (int i = 0; i < entries.length(); i++) {
-                        JSONObject entry = entries.getJSONObject(i);
-                        JSONObject values = entry.getJSONObject("values");
-                        int deaths = values.getJSONObject("deaths").getJSONObject("basic").getInt("value");
-
-                        if (deaths > 0) {
-                            isFlawless = false;
-                            break;
-                        }
-                    }
-
-                    return isFlawless;
-                })
-                .onErrorReturn(false);
+        response.subscribe(
+                responseBody -> isLowMan(responseBody, raid, instanceId, message),
+                error -> System.err.println("Error accessing Bungie API: " + error.getMessage())
+        );
     }
-    private Mono<Boolean> isFreshRaid(String instanceId) {
-        String pgcrEndpoint = "/Destiny2/Stats/PostGameCarnageReport/{instanceId}/";
 
-        return webClient.get()
-                .uri(uriBuilder -> uriBuilder.path(pgcrEndpoint).build(instanceId))
-                .retrieve()
-                .bodyToMono(String.class)
-                .flatMap(responseBody -> {
-                    // Check if the raid is fresh
-                    JSONObject jsonObject = new JSONObject(responseBody);
-                    boolean activityStartedFromBeginning = jsonObject.getJSONObject("Response").getBoolean("activityWasStartedFromBeginning");
+    private void isLowMan(String responseBody, Raid raid, String instanceId, Message message) {
+        JSONObject jsonObject = new JSONObject(responseBody);
+        JSONObject responseData = jsonObject.getJSONObject("Response");
 
-                    if (activityStartedFromBeginning) {
-                        boolean isFreshRaid = true;
-                    }
+        HashSet<String> accountCount = new HashSet<>();
+        double totalDeaths = 0.0;
+        JSONArray entries = responseData.getJSONArray("entries");
+        for (int i = 0; i < entries.length(); i++) {
+            JSONObject entry = entries.getJSONObject(i);
+            String bungieGlobalDisplayName = entry.getJSONObject("player").getJSONObject
+                    ("destinyUserInfo").getString("bungieGlobalDisplayName");
+            double playerDeaths = entry.getJSONObject("values").getJSONObject("deaths")
+                    .getJSONObject("basic").getDouble("value");
+            totalDeaths += playerDeaths;
+            accountCount.add(bungieGlobalDisplayName);
+        }
+        if (accountCount.size() <= 3) {
+            int playerCount = accountCount.size();
+            raidTags(playerCount, responseData, totalDeaths, raid, instanceId, message);
+        }
+    }
+    private void raidTags(int playerCount, JSONObject responseData, double totalDeaths, Raid raid,
+                          String instanceId, Message message) {
+        String lowmanCategory = getLowmanCategory(playerCount);
+        String flawlessStatus = isFlawless(totalDeaths);
+        String freshness = isFresh(responseData);
 
-                    return Mono.just(activityStartedFromBeginning);
-                })
-                .onErrorReturn(false);
+        String entry = lowmanCategory + flawlessStatus + freshness + raid.name();
+        addToReport(entry, instanceId, message);
+    }
+    private String getLowmanCategory(int playerCount) {
+        return switch (playerCount) {
+            case 2 -> "Duo ";
+            case 3 -> "Trio ";
+            default -> "Solo ";
+        };
+    }
+
+    private String isFlawless(double totalDeaths) {
+        return totalDeaths == 0 ? "Flawless " : "";
+    }
+
+    private String isFresh(JSONObject responseData) {
+        boolean isFresh = responseData.getBoolean("activityWasStartedFromBeginning");
+        return isFresh ? "Fresh " : "Checkpoint ";
+    }
+    private void addToReport(String entry, String instanceId, Message message) {
+        if (!report.contains(entry)) {
+            report.add(entry);
+            String raidReport = " <https://raid.report/pgcr/" + instanceId + ">";
+            String finalEntry = entry + raidReport;
+
+            listener.lowmanCommand(finalEntry, message).subscribe();
+            System.out.println(finalEntry);
+        }
     }
 }

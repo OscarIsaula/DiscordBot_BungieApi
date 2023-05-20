@@ -79,26 +79,26 @@ public abstract class MessageListener {
                         TheQuickster handles the following commands:
                         \s
                         !day1 bungie_id
-                        !lowman bungie_id (Under Construction)
+                        !lowman bungie_id (Please don't spam it, once every 10s is fine.)
                         !quote
                         !joke
                         !was kap blackballed
-
-                        'If there's anything else you need...\040
-                        please hesitate to ask' -Squidward\040
-                        (Bubble Buddy, Nov 2000)
+                        
+                        __Note:__
+                        ```!lowman iterates through up to 150 pages of an accounts raid activity and
+                        checks every single clear for lowmans. Please respect Bungie API rates and 
+                        limits by not abusing the command. The !day1 command only iterates through
+                        raids attempted within the respective 24 hour period. So that command is fine.```
                         """))
                 .then();
     }
-    public Mono<Void> day1Command(String results, Message message) {
+    public Mono<Void> day1Command(String results, String raidName, Message message) {
         if (results == null || results.trim().isEmpty()) {
             return Mono.empty();
         }
 
-        String[] resultLines = results.split("\n");
-
         return message.getChannel()
-                .flatMap(channel -> channel.createEmbed(spec -> buildEmbed(spec, resultLines)))
+                .flatMap(channel -> channel.createEmbed(spec -> buildDay1Embed(spec, results, raidName)))
                 .then();
     }
     public Mono<Void> lowmanCommand(String results, Message message) {
@@ -107,10 +107,8 @@ public abstract class MessageListener {
             return Mono.empty();
         }
 
-        String[] resultLines = results.split("\n");
-
         return message.getChannel()
-                .flatMap(channel -> channel.createEmbed(spec -> buildEmbed(spec, resultLines)))
+                .flatMap(channel -> channel.createEmbed(spec -> buildLowManEmbed(spec, results)))
                 .then();
     }
     private String getRandomQuote(List<String> quotes) {
@@ -139,15 +137,13 @@ public abstract class MessageListener {
                 )
                 .then();
     }
-    private void buildEmbed(LegacyEmbedCreateSpec spec, String[] resultLines) {
+    private void buildDay1Embed(LegacyEmbedCreateSpec spec, String results, String raidName) {
         spec.setColor(Color.of(255, 100, 100)); // Set the embed color
+        spec.addField(raidName, results, false);
 
-        for (int i = 0; i < resultLines.length; i += 3) {
-            String title = resultLines[i].replace("Raid Report: ", "").trim();
-            String url = resultLines[i + 1].trim();
-            String description = resultLines[i + 2].trim();
-
-            spec.addField("", "" + title + "\n" + url + "\n" + description, false);
-        }
+    }
+    private void buildLowManEmbed(LegacyEmbedCreateSpec spec, String results) {
+        spec.setColor(Color.of(255, 100, 100)); // Set the embed color
+        spec.addField("", results, false);
     }
 }

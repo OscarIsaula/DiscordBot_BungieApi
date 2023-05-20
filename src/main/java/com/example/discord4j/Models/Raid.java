@@ -12,7 +12,7 @@ public record Raid(String name, String hash, String releaseTime, int hours) {
                 "2018-12-07T17:00:00Z", 24));
         raids.put("CoS", new Raid("Crown of Sorrow", "3333172150",
                 "2019-06-04T17:00:00Z", 24));
-        raids.put("GoS", new Raid("Garden of Salvation", "2659723068",
+        raids.put("GoS", new Raid("Garden of Salvation", "3458480158",
                 "2019-10-05T17:00:00Z", 24));
         raids.put("DSC", new Raid("Deep Stone Crypt", "910380154",
                 "2020-11-21T17:00:00Z", 24));

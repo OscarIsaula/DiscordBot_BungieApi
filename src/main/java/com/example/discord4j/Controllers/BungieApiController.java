@@ -92,7 +92,7 @@ public class BungieApiController {
         }
         else if (command.equals("lowman")) {
             lowManController.getActivityHistory
-                    (characterIds, membershipType, membershipId, message);
+            (characterIds, membershipType, membershipId, message);
         }
     }
 }

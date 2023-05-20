@@ -29,10 +29,12 @@ public class BotConfig {
                 .block();
 
         for(EventListener<T> listener : eventListeners) {
-            client.on(listener.getEventType())
-                    .flatMap(listener::execute)
-                    .onErrorResume(listener::handleError)
-                    .subscribe();
+            if (client != null) {
+                client.on(listener.getEventType())
+                        .flatMap(listener::execute)
+                        .onErrorResume(listener::handleError)
+                        .subscribe();
+            }
         }
 
         return client;
